@@ -5,62 +5,16 @@ import { useEffect, useState } from "react";
 type Product = {
   id: number;
   name: string;
+  description: string;
   price: number;
+  image: string;
+  category: string;
+  stockQuantity: number;
   emoji: string;
   color: string;
   tag: string;
-  image: string;
 };
-
 type CartItem = Product & { quantity: number };
-
-const products: Product[] = [
-  {
-    id: 1,
-    name: "Yellow Flower Keychain",
-    price: 199,
-    emoji: "🌼",
-    color: "product-yellow",
-    tag: "Handmade",
-    image: "/products/yellow-flower-keychain.jpeg",
-  },
-  {
-    id: 2,
-    name: "Blue Bow Keychain",
-    price: 99,
-    emoji: "🎀",
-    color: "product-lilac",
-    tag: "Cute Favourite",
-    image: "/products/blue-bow-keychain.jpeg",
-  },
-  {
-    id: 3,
-    name: "Blue Handmade Flower",
-    price: 249,
-    emoji: "🌷",
-    color: "product-peach",
-    tag: "Handmade",
-    image: "/products/blue-flower.jpeg",
-  },
-  {
-    id: 4,
-    name: "Pink Handmade Flower",
-    price: 249,
-    emoji: "🌸",
-    color: "product-pink",
-    tag: "Made with Love",
-    image: "/products/pink-flower.jpeg",
-  },
-  {
-    id: 5,
-    name: "Pink Scrunchie",
-    price: 149,
-    emoji: "🎀",
-    color: "product-pink",
-    tag: "Soft & Pretty",
-    image: "/products/pink-scrunchie.jpeg",
-  },
-];
 
 const categories = [
   {
@@ -110,6 +64,74 @@ const instagramDmUrl = "https://ig.me/m/veloura.studio_26";
 
 export default function ShopClient() {
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [customerName, setCustomerName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [customizationNotes, setCustomizationNotes] = useState("");
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState("");
+  const [orderSuccess, setOrderSuccess] = useState("");
+const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
+  event.preventDefault();
+  setCheckoutError("");
+  setOrderSuccess("");
+
+  if (cart.length === 0) {
+    setCheckoutError("Your cart is empty.");
+    return;
+  }
+
+  setCheckoutLoading(true);
+
+  try {
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        customerName,
+        phone,
+        deliveryAddress,
+        customizationNotes,
+        items: cart.map((item) => ({
+          productId: Number(item.id),
+          quantity: item.quantity,
+        })),
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || "Unable to place your order.");
+    }
+
+    setOrderSuccess(
+  `Order #${result.order.id} placed successfully! Total: ₹${Number(
+    result.order.subtotal
+  ).toFixed(2)}`
+);
+
+    setCart([]);
+    setCustomerName("");
+    setPhone("");
+    setDeliveryAddress("");
+    setCustomizationNotes("");
+  } catch (error) {
+    setCheckoutError(
+      error instanceof Error
+        ? error.message
+        : "Something went wrong. Please try again."
+    );
+  } finally {
+    setCheckoutLoading(false);
+  }
+};
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
   const [orderCopied, setOrderCopied] = useState(false);
   const [imageErrors, setImageErrors] = useState<number[]>([]);
@@ -123,6 +145,86 @@ export default function ShopClient() {
     (sum, item) => sum + item.price * item.quantity,
     0
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProducts() {
+      try {
+        setProductsLoading(true);
+        setProductsError("");
+
+        const response = await fetch("/api/products");
+        const data: {
+          success: boolean;
+          products?: Array<{
+            id: string;
+            name: string;
+            description: string | null;
+            price: number;
+            image: string | null;
+            category: string | null;
+            stockQuantity: number;
+          }>;
+          message?: string;
+        } = await response.json();
+
+        if (!response.ok || !data.success || !data.products) {
+          throw new Error(data.message ?? "Unable to load products.");
+        }
+
+        const mappedProducts: Product[] = data.products.map((product) => {
+          const name = product.name.toLowerCase();
+          let emoji = "🎀";
+          if (name.includes("yellow") || name.includes("flower")) emoji = "🌸";
+          if (name.includes("keychain")) emoji = "🌼";
+          if (name.includes("bow") || name.includes("scrunchie")) emoji = "🎀";
+
+          let color = "product-pink";
+          if (name.includes("yellow")) color = "product-yellow";
+          else if (name.includes("blue")) {
+            color = name.includes("flower") ? "product-peach" : "product-lilac";
+          }
+
+          let tag = "Handmade";
+          if (name.includes("bow")) tag = "Cute Favourite";
+          else if (name.includes("scrunchie")) tag = "Soft & Pretty";
+          else if (name.includes("pink")) tag = "Made with Love";
+
+          return {
+            id: Number(product.id),
+            name: product.name,
+            description: product.description ?? "Carefully handmade, especially for you.",
+            price: Number(product.price),
+            image: product.image ?? "",
+            category: product.category ?? "Handmade",
+            stockQuantity: Number(product.stockQuantity ?? 0),
+            emoji,
+            color,
+            tag,
+          };
+        });
+
+        if (!cancelled) setProducts(mappedProducts);
+      } catch (error) {
+        if (!cancelled) {
+          setProductsError(
+            error instanceof Error
+              ? error.message
+              : "We couldn't load the collection. Please try again."
+          );
+        }
+      } finally {
+        if (!cancelled) setProductsLoading(false);
+      }
+    }
+
+    void loadProducts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     document.body.style.overflow = cartOpen ? "hidden" : "";
@@ -327,8 +429,30 @@ export default function ShopClient() {
           <p>Each piece is made with care and a whole lot of love.</p>
         </div>
 
-        <div className="product-grid">
-          {products.map((product) => (
+        {productsLoading && (
+          <p className="shop-note" role="status">Loading our handmade collection… ♡</p>
+        )}
+
+        {!productsLoading && productsError && (
+          <div className="shop-note" role="alert">
+            <p>{productsError}</p>
+            <button
+              className="add-button"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Try again
+            </button>
+          </div>
+        )}
+
+        {!productsLoading && !productsError && products.length === 0 && (
+          <p className="shop-note">No products are available right now. Please check back soon ♡</p>
+        )}
+
+        {!productsLoading && !productsError && products.length > 0 && (
+          <div className="product-grid">
+            {products.map((product) => (
             <article className="product-card" key={product.id}>
               <div className={`product-art ${product.color}`}>
                 <span className="product-tag">{product.tag}</span>
@@ -362,20 +486,22 @@ export default function ShopClient() {
                 </div>
 
                 <p className="product-description">
-                  Carefully handmade, especially for you.
+                  {product.description || "Carefully handmade, especially for you."}
                 </p>
 
                 <button
                   className="add-button"
                   type="button"
                   onClick={() => addToCart(product)}
+                  disabled={product.stockQuantity <= 0}
                 >
-                  Add to bag +
+                  {product.stockQuantity <= 0 ? "Sold out" : "Add to bag +"}
                 </button>
               </div>
             </article>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <p className="shop-note">
           More handmade surprises coming soon ♡
@@ -428,7 +554,7 @@ export default function ShopClient() {
           Instagram ↗
         </a>
 
-        <small>© {new Date().getFullYear()} Veloura Studio</small>
+        <small>© 2026 Veloura Studio</small>
       </footer>
 
       {cartOpen && (
@@ -560,14 +686,27 @@ export default function ShopClient() {
                     Delivery charges, if any, can be confirmed through
                     Instagram.
                   </p>
+                  
+                    <button
+                    className="checkout-button"
+                    type="button"
+                    onClick={() => {
+                        setCheckoutOpen(true);
+                        setCheckoutError("");
+                        setOrderSuccess("");
+                    }}
+                    >
+                    Order through Website ♡
+                    </button>
 
-                  <button
+                    <button
                     className="checkout-button"
                     type="button"
                     onClick={orderOnInstagram}
-                  >
+                    style={{ marginTop: "10px" }}
+                    >
                     Order through Instagram ↗
-                  </button>
+                    </button>
 
                     {orderCopied && (
                     <p className="order-confirmation" role="status">
@@ -586,6 +725,176 @@ export default function ShopClient() {
           </aside>
         </div>
       )}
+
+      {checkoutOpen && (
+        <div
+          className="cart-overlay"
+          onClick={() => {
+            if (!checkoutLoading) setCheckoutOpen(false);
+          }}
+        >
+          <section
+            className="cart-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Website checkout"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="cart-header">
+              <div>
+                <p className="eyebrow">ALMOST YOURS ♡</p>
+                <h2>Checkout</h2>
+              </div>
+
+              <button
+                className="cart-close"
+                type="button"
+                onClick={() => setCheckoutOpen(false)}
+                disabled={checkoutLoading}
+                aria-label="Close checkout"
+              >
+                ×
+              </button>
+            </div>
+
+            {orderSuccess ? (
+              <div className="empty-cart">
+                <span aria-hidden="true">💗</span>
+                <h3>Thank you for your order!</h3>
+                <p>{orderSuccess}</p>
+                <p>We have saved your order. Please contact us on Instagram to confirm delivery arrangements.</p>
+
+                <a
+                  className="checkout-button"
+                  href={instagramDmUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Contact us on Instagram ↗
+                </a>
+
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => {
+                    setCheckoutOpen(false);
+                    setOrderSuccess("");
+                  }}
+                  style={{ marginTop: "12px" }}
+                >
+                  Continue shopping
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleCheckout}>
+                <div className="cart-items">
+                  <h3>Your order</h3>
+
+                  {cart.map((item) => (
+                    <div className="cart-item" key={item.id}>
+                      <div className="cart-item-details">
+                        <h3>{item.name}</h3>
+                        <p>
+                          ₹{item.price} × {item.quantity}
+                        </p>
+                      </div>
+
+                      <strong>₹{item.price * item.quantity}</strong>
+                    </div>
+                  ))}
+
+                  <div className="cart-total">
+                    <span>Total</span>
+                    <strong>₹{total}</strong>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gap: "14px",
+                    marginTop: "20px",
+                  }}
+                >
+                  <label>
+                    Full name *
+                    <input
+                      type="text"
+                      value={customerName}
+                      onChange={(event) => setCustomerName(event.target.value)}
+                      required
+                      maxLength={120}
+                      autoComplete="name"
+                      placeholder="Enter your full name"
+                      style={{ width: "100%", padding: "12px", marginTop: "6px" }}
+                    />
+                  </label>
+
+                  <label>
+                    Phone number *
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(event) => setPhone(event.target.value)}
+                      required
+                      maxLength={20}
+                      autoComplete="tel"
+                      placeholder="Enter your phone number"
+                      style={{ width: "100%", padding: "12px", marginTop: "6px" }}
+                    />
+                  </label>
+
+                  <label>
+                    Delivery address *
+                    <textarea
+                      value={deliveryAddress}
+                      onChange={(event) => setDeliveryAddress(event.target.value)}
+                      required
+                      maxLength={1000}
+                      autoComplete="street-address"
+                      placeholder="House number, street, city, PIN code"
+                      rows={3}
+                      style={{ width: "100%", padding: "12px", marginTop: "6px" }}
+                    />
+                  </label>
+
+                  <label>
+                    Customization notes (optional)
+                    <textarea
+                      value={customizationNotes}
+                      onChange={(event) => setCustomizationNotes(event.target.value)}
+                      maxLength={1000}
+                      placeholder="Colours, gift messages, or special requests"
+                      rows={3}
+                      style={{ width: "100%", padding: "12px", marginTop: "6px" }}
+                    />
+                  </label>
+                </div>
+
+                {checkoutError && (
+                  <p className="order-confirmation" role="alert">
+                    {checkoutError}
+                  </p>
+                )}
+
+                <button
+                  className="checkout-button"
+                  type="submit"
+                  disabled={checkoutLoading || cart.length === 0}
+                  style={{ marginTop: "20px" }}
+                >
+                  {checkoutLoading ? "Placing your order..." : `Place Order · ₹${total}`}
+                </button>
+
+                <p className="checkout-small">
+                  Your order details will be saved to our order database. Payment and delivery arrangements will be confirmed separately.
+                </p>
+              </form>
+            )}
+          </section>
+        </div>
+      )}
+
     </main>
   );
 }
