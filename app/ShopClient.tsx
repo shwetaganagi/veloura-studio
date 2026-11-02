@@ -377,14 +377,12 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
           </p>
         </div>
 
-        <div className="hero-art">
+                <div className="hero-art">
           <div className="hero-image-frame">
             <img
-              src="/products/pink-flower.jpeg"
-              alt="Pink handmade flower crafted by Veloura Studio"
-              onError={(event) => {
-                event.currentTarget.style.display = "none";
-              }}
+              src="/products/Veloura Creations Floral Embroidery Logo.jpeg"
+              alt="Veloura.creations"
+              className="hero-logo-image"
             />
           </div>
 
@@ -394,7 +392,6 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
           </div>
         </div>
       </section>
-
       <section className="section categories-section" id="categories">
         <div className="section-heading">
           <p className="eyebrow">FIND YOUR FAVOURITE</p>
