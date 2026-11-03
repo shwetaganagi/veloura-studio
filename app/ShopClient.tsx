@@ -61,6 +61,7 @@ const categories = [
 
 const instagramUrl = "https://www.instagram.com/veloura.studio_26/";
 const instagramDmUrl = "https://ig.me/m/veloura.studio_26";
+const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "";
 
 export default function ShopClient() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -72,10 +73,12 @@ export default function ShopClient() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [orderSuccess, setOrderSuccess] = useState("");
+  const [whatsappOrderUrl, setWhatsappOrderUrl] = useState("");
 const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
   event.preventDefault();
   setCheckoutError("");
   setOrderSuccess("");
+  setWhatsappOrderUrl("");
 
   if (cart.length === 0) {
     setCheckoutError("Your cart is empty.");
@@ -108,11 +111,47 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
       throw new Error(result.error || "Unable to place your order.");
     }
 
+    const orderId = result.order.id;
+    const orderTotal = Number(result.order.subtotal);
+    const orderItems = cart.map(
+      (item) => `${item.name} x ${item.quantity}`
+    );
+
+    const whatsappMessage = [
+      "Hello Veloura Studio! 💗",
+      "",
+      "I have placed an order through your website.",
+      `Order ID: #${orderId}`,
+      "",
+      "Order details:",
+      ...orderItems,
+      "",
+      `Total: ₹${orderTotal.toFixed(2)}`,
+      "",
+      `Customer name: ${customerName}`,
+      `Phone: ${phone}`,
+      `Delivery address: ${deliveryAddress}`,
+      customizationNotes
+        ? `Customization notes: ${customizationNotes}`
+        : "",
+      "",
+      "Please confirm my order. Thank you! ♡",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const cleanWhatsappNumber = whatsappNumber.replace(/\D/g, "");
+    if (cleanWhatsappNumber) {
+      setWhatsappOrderUrl(
+        `https://wa.me/${cleanWhatsappNumber}?text=${encodeURIComponent(
+          whatsappMessage
+        )}`
+      );
+    }
+
     setOrderSuccess(
-  `Order #${result.order.id} placed successfully! Total: ₹${Number(
-    result.order.subtotal
-  ).toFixed(2)}`
-);
+      `Order #${orderId} placed successfully! Total: ₹${orderTotal.toFixed(2)}`
+    );
 
     setCart([]);
     setCustomerName("");
@@ -759,7 +798,26 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                 <span aria-hidden="true">💗</span>
                 <h3>Thank you for your order!</h3>
                 <p>{orderSuccess}</p>
-                <p>We have saved your order. Please contact us on Instagram to confirm delivery arrangements.</p>
+                <p>
+                  We have saved your order. You can now send the order details
+                  directly to us on WhatsApp.
+                </p>
+
+                {whatsappOrderUrl ? (
+                  <a
+                    className="checkout-button"
+                    href={whatsappOrderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Send Order on WhatsApp ↗
+                  </a>
+                ) : (
+                  <p className="order-confirmation" role="alert">
+                    WhatsApp ordering is temporarily unavailable. Please contact
+                    us on Instagram instead.
+                  </p>
+                )}
 
                 <a
                   className="checkout-button"
@@ -830,15 +888,19 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                   <label>
                     Phone number *
                     <input
-                      type="tel"
-                      value={phone}
-                      onChange={(event) => setPhone(event.target.value)}
-                      required
-                      maxLength={20}
-                      autoComplete="tel"
-                      placeholder="Enter your phone number"
-                      style={{ width: "100%", padding: "12px", marginTop: "6px" }}
-                    />
+  type="tel"
+  value={phone}
+  onChange={(event) =>
+    setPhone(event.target.value.replace(/\D/g, "").slice(0, 10))
+  }
+  required
+  maxLength={10}
+  inputMode="numeric"
+  pattern="[6-9][0-9]{9}"
+  autoComplete="tel"
+  placeholder="Enter your 10-digit mobile number"
+  style={{ width: "100%", padding: "12px", marginTop: "6px" }}
+/>
                   </label>
 
                   <label>
