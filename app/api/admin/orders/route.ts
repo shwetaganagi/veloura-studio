@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+
+import { NextResponse, connection } from "next/server";
 import { cookies } from "next/headers";
 import { pool } from "@/lib/db";
 import {
@@ -7,7 +8,10 @@ import {
 } from "@/lib/auth/admin";
 
 export async function GET() {
+  await connection();
   try {
+    // Ensure this handler runs at request time.
+
     // 1. Read the admin session cookie.
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
