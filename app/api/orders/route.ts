@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     typeof body.customerName === "string" ? body.customerName.trim() : "";
 
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+  const isValidPhone = /^[6-9]\d{9}$/.test(phone);
 
   const deliveryAddress =
     typeof body.deliveryAddress === "string"
@@ -50,6 +51,15 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  if (!isValidPhone) {
+  return NextResponse.json(
+    {
+      success: false,
+      message: "Please enter a valid 10-digit Indian mobile number.",
+    },
+    { status: 400 }
+  );
+}
 
   if (
     customerName.length > 150 ||
