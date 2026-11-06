@@ -49,6 +49,49 @@ function formatStatus(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+function sendWhatsAppUpdate(order: Order) {
+  let phone = order.phone.replace(/\D/g, "");
+
+  // Add India's country code if the number has 10 digits.
+  if (phone.length === 10) {
+    phone = `91${phone}`;
+  }
+
+  if (phone.length !== 12 || !phone.startsWith("91")) {
+    alert("Invalid Indian mobile number for this order.");
+    return;
+  }
+
+  const productDetails = order.items
+    .map((item) => `${item.productName} × ${item.quantity}`)
+    .join("\n");
+
+  const message = `Hello ${order.customer_name}! 💗
+
+Thank you for shopping with Veloura Studio.
+
+Here is an update on your order:
+
+Order ID: #${order.id}
+Order Status: ${formatStatus(order.status)}
+
+Products:
+${productDetails}
+
+Order Total: ${formatRupees(order.subtotal_paise)}
+
+Thank you for supporting our handmade creations! ✨
+
+With love,
+Veloura Studio`;
+
+  const whatsappUrl =
+    `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+
+  window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+}
+
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -471,6 +514,15 @@ const filteredOrders = orders.filter((order) => {
                   Saving status...
                 </span>
               )}
+
+<button
+  type="button"
+  onClick={() => sendWhatsAppUpdate(order)}
+  className="mt-2 w-full rounded-xl bg-[#25D366] px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1da851] focus:outline-none focus:ring-4 focus:ring-[#25D366]/20 sm:w-52"
+>
+  Send WhatsApp Update
+</button>
+
             </div>
           </div>
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { getCustomerSession } from "@/lib/auth/customer";
 
 type OrderItemInput = {
   productId: number;
@@ -177,25 +178,29 @@ export async function POST(request: Request) {
       };
     });
 
-    const orderResult = await client.query(
-      `INSERT INTO orders (
-         customer_name,
-         phone,
-         delivery_address,
-         customization_notes,
-         subtotal_paise,
-         status
-       )
-       VALUES ($1, $2, $3, $4, $5, 'pending')
-       RETURNING id, status, created_at`,
-      [
-        customerName,
-        phone,
-        deliveryAddress,
-        customizationNotes || null,
-        subtotalPaise,
-      ]
-    );
+    const customerSession = await getCustomerSession();
+
+const orderResult = await client.query(
+  `INSERT INTO orders (
+     customer_id,
+     customer_name,
+     phone,
+     delivery_address,
+     customization_notes,
+     subtotal_paise,
+     status
+   )
+   VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+   RETURNING id, status, created_at`,
+  [
+    customerSession?.customerId ?? null,
+    customerName,
+    phone,
+    deliveryAddress,
+    customizationNotes || null,
+    subtotalPaise,
+  ]
+);
 
     const order = orderResult.rows[0];
 

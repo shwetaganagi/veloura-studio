@@ -1140,3 +1140,441 @@ main {
   object-fit: cover;
   object-position: center;
 }
+
+
+/* Customer Authentication Pages */
+
+.auth-page {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 40px 20px;
+  background: var(--blush);
+}
+
+.auth-card {
+  width: min(100%, 460px);
+  padding: 48px 42px;
+  border: 1px solid var(--line);
+  background: var(--cream);
+  box-shadow: 0 15px 45px rgba(75, 43, 49, 0.06);
+}
+
+.auth-brand {
+  display: block;
+  margin-bottom: 42px;
+  color: var(--ink);
+  font-family: "Playfair Display", serif;
+  font-size: 27px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.auth-card > .eyebrow {
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-family: "Playfair Display", serif;
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.auth-description {
+  margin: 14px 0 30px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+  text-align: center;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.auth-form label {
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-form input {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  outline: none;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.auth-form input:focus {
+  border-color: var(--pink);
+}
+
+.auth-forgot {
+  margin: 2px 0 8px;
+  text-align: right;
+}
+
+.auth-forgot a,
+.auth-switch a {
+  color: var(--pink-dark);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.auth-submit {
+  min-height: 48px;
+  margin-top: 8px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s ease;
+}
+
+.auth-submit:hover {
+  background: var(--pink-dark);
+  border-color: var(--pink-dark);
+}
+
+.auth-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.auth-message {
+  margin: 4px 0;
+  color: #a33c4b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.auth-switch {
+  margin: 25px 0 20px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.auth-back {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  text-decoration: none;
+}
+
+@media (max-width: 500px) {
+  .auth-card {
+    padding: 35px 24px;
+  }
+
+  .auth-card h1 {
+    font-size: 29px;
+  }
+}
+
+/* Registration page spacing */
+
+.register-card {
+  width: min(100%, 480px);
+}
+
+.register-card .auth-brand {
+  margin-bottom: 30px;
+}
+
+.register-card .auth-description {
+  margin-bottom: 22px;
+}
+
+.register-card .auth-form {
+  gap: 8px;
+}
+
+.register-card .auth-form label {
+  margin-top: 5px;
+}
+.account-details {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 28px 0;
+  text-align: left;
+}
+
+.account-details div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  background: var(--blush);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.account-details span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.account-details strong {
+  color: var(--ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.account-home-link {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--pink-dark);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.account-orders {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+}
+
+.account-orders h2 {
+  color: var(--ink);
+  font-size: 21px;
+  margin-bottom: 8px;
+}
+
+.empty-orders {
+  padding: 24px 12px;
+  background: var(--blush);
+  border-radius: 12px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.orders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.order-card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--white);
+}
+
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.order-header div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.order-header span:first-child,
+.order-date {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.order-header strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.order-status {
+  padding: 6px 10px;
+  border-radius: 20px;
+  background: var(--blush);
+  color: var(--pink-dark);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.order-date {
+  margin: 12px 0;
+}
+
+.order-items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.order-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.order-item strong {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.order-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 14px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.account-logout {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 20px;
+  margin-top: 18px;
+  border: 1px solid var(--pink-dark);
+  border-radius: 8px;
+  background: var(--pink);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-logout:hover {
+  background: var(--pink-dark);
+}
+.auth-success {
+  margin: 12px 0;
+  padding: 12px;
+  background: #edf8ef;
+  color: #287a45;
+  font-size: 12px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+
+/* ================================
+   ORDER TRACKING TIMELINE
+================================ */
+
+.order-tracking {
+  margin-top: 22px;
+  padding: 18px;
+  background: #fff8f6;
+  border: 1px solid #f1ded9;
+  border-radius: 12px;
+}
+
+.order-tracking h3 {
+  margin: 0 0 18px;
+  font-size: 16px;
+}
+
+.tracking-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tracking-timeline li {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  position: relative;
+  min-height: 58px;
+}
+
+.tracking-timeline li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 13px;
+  top: 28px;
+  height: 30px;
+  width: 2px;
+  background: #e8d6d2;
+}
+
+.tracking-dot {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #eee5e2;
+  color: #8a7772;
+  font-size: 12px;
+  font-weight: 700;
+  z-index: 1;
+}
+
+.is-complete .tracking-dot {
+  background: #6c9b78;
+  color: #ffffff;
+}
+
+.is-current .tracking-dot {
+  background: #c66b80;
+  color: #ffffff;
+}
+
+.tracking-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 3px;
+}
+
+.tracking-stage strong {
+  font-size: 13px;
+}
+
+.tracking-stage span {
+  font-size: 11px;
+  color: #9b7774;
+}
+
+.is-current .tracking-stage strong {
+  color: #bd6078;
+}
+
+/* Cancelled Order */
+
+.tracking-cancelled {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #fff0f0;
+  color: #a33c48;
+}
+
+.tracking-cancelled p {
+  margin: 5px 0 0;
+  font-size: 13px;
+}
