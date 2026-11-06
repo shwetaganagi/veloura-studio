@@ -1,19 +1,33 @@
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
+import { cookies } from "next/headers";
 import { pool } from "@/lib/db";
-
+import {
+  SESSION_COOKIE_NAME,
+  verifyAdminSession,
+} from "@/lib/auth/admin";
 
 export async function GET() {
+  await connection();
+
   try {
-    const result = await pool.query(
-      "SELECT current_database() AS database, current_user AS username, version() AS version"
-    );
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+
+    if (!token || !(await verifyAdminSession(token))) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Unauthorized. Please log in as an administrator.",
+        },
+        { status: 401 }
+      );
+    }
+
+    await pool.query("SELECT 1");
 
     return NextResponse.json({
       success: true,
       message: "Database connection successful",
-      database: result.rows[0].database,
-      username: result.rows[0].username,
-      version: result.rows[0].version.split(" ")[1],
     });
   } catch (error) {
     console.error("Database connection test failed:", error);

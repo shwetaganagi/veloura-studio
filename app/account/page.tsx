@@ -98,6 +98,22 @@ export default function AccountPage() {
     loadAccount();
   }, [router]);
 
+  useEffect(() => {
+    if (loading) return;
+
+    const sectionId = window.location.hash.slice(1);
+    if (sectionId !== "profile" && sectionId !== "orders") return;
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(sectionId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [loading]);
+
   async function handleLogout() {
     setLoggingOut(true);
 
@@ -277,7 +293,7 @@ function renderOrderTracking(status: string) {
           Manage your account and keep track of your orders.
         </p>
 
-        <div className="account-details">
+        <div className="account-details" id="profile">
   <div>
     <span>Full Name</span>
     <strong>{customer.fullName}</strong>
@@ -378,7 +394,7 @@ function renderOrderTracking(status: string) {
   </p>
 )}
 
-        <div className="account-orders">
+        <div className="account-orders" id="orders">
           <h2>My Orders</h2>
           <p className="auth-description">
             Your recent purchases and order updates.
@@ -390,7 +406,7 @@ function renderOrderTracking(status: string) {
             <p className="auth-message">{ordersError}</p>
           ) : orders.length === 0 ? (
             <div className="empty-orders">
-              <p>You haven't placed any orders yet.</p>
+              <p>You haven&apos;t placed any orders yet.</p>
               <button
                 className="account-home-link"
                 onClick={() => router.push("/")}

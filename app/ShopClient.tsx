@@ -1,6 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import {
+  Grid2X2,
+  House,
+  LogIn,
+  LogOut,
+  Menu,
+  MessageCircle,
+  Package,
+  ShoppingBag,
+  Store,
+  UserPlus,
+  UserRound,
+  X,
+} from "lucide-react";
 
 type Product = {
   id: number;
@@ -64,6 +80,7 @@ const instagramDmUrl = "https://ig.me/m/veloura.studio_26";
 const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? "";
 
 export default function ShopClient() {
+  const router = useRouter();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
@@ -174,6 +191,13 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
   const [cartOpen, setCartOpen] = useState(false);
   const [orderCopied, setOrderCopied] = useState(false);
   const [imageErrors, setImageErrors] = useState<number[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("home");
+  const [authStatus, setAuthStatus] = useState<
+    "loading" | "logged-in" | "logged-out" | "error"
+  >("loading");
+  const [authError, setAuthError] = useState("");
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const itemCount = cart.reduce(
     (sum, item) => sum + item.quantity,
@@ -273,6 +297,95 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
     };
   }, [cartOpen]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkCustomerSession() {
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+
+        if (cancelled) return;
+
+        if (response.status === 401) {
+          setAuthStatus("logged-out");
+          return;
+        }
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || "Unable to check your account.");
+        }
+
+        setAuthStatus("logged-in");
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Customer session check failed:", error);
+          setAuthError("Account status is currently unavailable.");
+          setAuthStatus("error");
+        }
+      }
+    }
+
+    void checkCustomerSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    function updateActiveSection() {
+      const categoriesTop =
+        document.getElementById("categories")?.getBoundingClientRect().top ??
+        Number.POSITIVE_INFINITY;
+      const shopTop =
+        document.getElementById("shop")?.getBoundingClientRect().top ??
+        Number.POSITIVE_INFINITY;
+
+      if (shopTop <= 150) {
+        setActiveSection("shop");
+      } else if (categoriesTop <= 150) {
+        setActiveSection("categories");
+      } else {
+        setActiveSection("home");
+      }
+    }
+
+    window.addEventListener("scroll", updateActiveSection, { passive: true });
+    updateActiveSection();
+
+    return () => window.removeEventListener("scroll", updateActiveSection);
+  }, []);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    setAuthError("");
+
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || "Unable to log out.");
+      }
+
+      setAuthStatus("logged-out");
+      setMenuOpen(false);
+      router.refresh();
+    } catch (error) {
+      console.error("Customer logout failed:", error);
+      setAuthError(
+        error instanceof Error ? error.message : "Unable to log out."
+      );
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
+  function closeNavigation(section?: string) {
+    if (section) setActiveSection(section);
+    setMenuOpen(false);
+  }
+
   function addToCart(product: Product) {
     setCart((currentCart) => {
       const existingItem = currentCart.find(
@@ -367,25 +480,153 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
           className="brand"
           href="#home"
           aria-label="Veloura Studio home"
+          onClick={() => closeNavigation("home")}
         >
           veloura studio <span>♡</span>
         </a>
 
-        <nav className="main-nav" aria-label="Main navigation">
-          <a href="#home">Home</a>
-          <a href="#categories">Categories</a>
-          <a href="#shop">Shop</a>
-          <a href="#about">Our Story</a>
+        <nav
+          className={`main-nav${menuOpen ? " is-open" : ""}`}
+          id="customer-navigation"
+          aria-label="Main navigation"
+        >
+          <a
+            href="#home"
+            className={activeSection === "home" ? "active" : ""}
+            aria-current={activeSection === "home" ? "page" : undefined}
+            onClick={() => closeNavigation("home")}
+          >
+            <House size={16} aria-hidden="true" />
+            <span>Home</span>
+          </a>
+          <a
+            href="#shop"
+            className={activeSection === "shop" ? "active" : ""}
+            aria-current={activeSection === "shop" ? "page" : undefined}
+            onClick={() => closeNavigation("shop")}
+          >
+            <Store size={16} aria-hidden="true" />
+            <span>Shop</span>
+          </a>
+          <a
+            href="#categories"
+            className={activeSection === "categories" ? "active" : ""}
+            aria-current={activeSection === "categories" ? "page" : undefined}
+            onClick={() => closeNavigation("categories")}
+          >
+            <Grid2X2 size={16} aria-hidden="true" />
+            <span>Categories</span>
+          </a>
+          <Link href="/account#orders" onClick={() => closeNavigation()}>
+            <Package size={16} aria-hidden="true" />
+            <span>My Orders</span>
+          </Link>
+          <Link href="/account#profile" onClick={() => closeNavigation()}>
+            <UserRound size={16} aria-hidden="true" />
+            <span>My Account</span>
+          </Link>
+          <a
+            href={instagramDmUrl}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => closeNavigation()}
+          >
+            <MessageCircle size={16} aria-hidden="true" />
+            <span>Contact Us</span>
+          </a>
+          {authStatus !== "loading" && (
+            <div className="nav-auth-mobile">
+              {authStatus === "logged-in" ? (
+                <>
+                  <Link href="/account#profile" onClick={() => closeNavigation()}>
+                    <UserRound size={16} aria-hidden="true" />
+                    <span>Account</span>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    disabled={loggingOut}
+                  >
+                    <LogOut size={16} aria-hidden="true" />
+                    <span>{loggingOut ? "Logging out…" : "Logout"}</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link href="/login" onClick={() => closeNavigation()}>
+                    <LogIn size={16} aria-hidden="true" />
+                    <span>Login</span>
+                  </Link>
+                  <Link href="/register" onClick={() => closeNavigation()}>
+                    <UserPlus size={16} aria-hidden="true" />
+                    <span>Register</span>
+                  </Link>
+                </>
+              )}
+            </div>
+          )}
         </nav>
 
-        <button
-          className="cart-button"
-          type="button"
-          onClick={() => setCartOpen(true)}
-          aria-label={`Open shopping bag, ${itemCount} items`}
-        >
-          Bag <span className="cart-count">{itemCount}</span>
-        </button>
+        <div className="nav-utilities">
+          <div className="nav-auth-desktop">
+            {authStatus === "logged-in" ? (
+              <>
+                <Link href="/account#profile" aria-label="My account">
+                  <UserRound size={17} aria-hidden="true" />
+                  <span>Account</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={loggingOut}
+                  aria-label="Log out"
+                  title={loggingOut ? "Logging out…" : "Log out"}
+                >
+                  <LogOut size={17} aria-hidden="true" />
+                </button>
+              </>
+            ) : authStatus === "logged-out" || authStatus === "error" ? (
+              <>
+                <Link href="/login" aria-label="Log in">
+                  <LogIn size={17} aria-hidden="true" />
+                  <span>Login</span>
+                </Link>
+                <Link href="/register" aria-label="Register">
+                  <UserPlus size={17} aria-hidden="true" />
+                  <span>Register</span>
+                </Link>
+              </>
+            ) : null}
+          </div>
+          {authError && (
+            <span className="nav-auth-error" role="alert">
+              {authError}
+            </span>
+          )}
+          <button
+            className="cart-button"
+            type="button"
+            onClick={() => setCartOpen(true)}
+            aria-label={`Open shopping bag, ${itemCount} items`}
+          >
+            <ShoppingBag size={18} aria-hidden="true" />
+            <span className="cart-count">{itemCount}</span>
+          </button>
+          <button
+            className="mobile-menu-toggle"
+            type="button"
+            aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={menuOpen}
+            aria-controls="customer-navigation"
+            onClick={() => setMenuOpen((isOpen) => !isOpen)}
+          >
+            {menuOpen ? (
+              <X size={21} aria-hidden="true" />
+            ) : (
+              <Menu size={21} aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </header>
 
       <section className="hero-section">
