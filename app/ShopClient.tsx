@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -31,6 +31,82 @@ type Product = {
   tag: string;
 };
 type CartItem = Product & { quantity: number };
+
+type RazorpayCheckoutResult = {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayCheckoutOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill: {
+    name: string;
+    contact: string;
+  };
+  theme: {
+    color: string;
+  };
+  handler: (result: RazorpayCheckoutResult) => void;
+  modal: {
+    ondismiss: () => void;
+  };
+};
+
+type RazorpayCheckoutInstance = {
+  open: () => void;
+  on: (
+    event: "payment.failed",
+    handler: (response: unknown) => void
+  ) => void;
+};
+
+type RazorpayConstructor = new (
+  options: RazorpayCheckoutOptions
+) => RazorpayCheckoutInstance;
+
+declare global {
+  interface Window {
+    Razorpay?: RazorpayConstructor;
+  }
+}
+
+let razorpayScriptPromise: Promise<boolean> | undefined;
+
+function loadRazorpayCheckout() {
+  if (window.Razorpay) {
+    return Promise.resolve(true);
+  }
+
+  if (!razorpayScriptPromise) {
+    razorpayScriptPromise = new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.async = true;
+      script.onload = () => {
+        const loaded = Boolean(window.Razorpay);
+        if (!loaded) {
+          razorpayScriptPromise = undefined;
+          script.remove();
+        }
+        resolve(loaded);
+      };
+      script.onerror = () => {
+        razorpayScriptPromise = undefined;
+        script.remove();
+        resolve(false);
+      };
+      document.body.appendChild(script);
+    });
+  }
+
+  return razorpayScriptPromise;
+}
 
 const categories = [
   {
@@ -87,15 +163,192 @@ export default function ShopClient() {
   const [phone, setPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [customizationNotes, setCustomizationNotes] = useState("");
+  const [checkoutMethod, setCheckoutMethod] = useState<"whatsapp" | "razorpay">(
+    "whatsapp"
+  );
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
   const [orderSuccess, setOrderSuccess] = useState("");
+  const [orderSuccessMethod, setOrderSuccessMethod] = useState<
+    "whatsapp" | "razorpay" | null
+  >(null);
+  const [paymentNotice, setPaymentNotice] = useState("");
   const [whatsappOrderUrl, setWhatsappOrderUrl] = useState("");
+  const razorpayRequestRef = useRef<{ fingerprint: string; key: string } | null>(
+    null
+  );
+
+  function clearCheckoutDetails() {
+    setCart([]);
+    setCustomerName("");
+    setPhone("");
+    setDeliveryAddress("");
+    setCustomizationNotes("");
+    razorpayRequestRef.current = null;
+  }
+
+  async function handleRazorpayCheckout() {
+    if (cart.length === 0) {
+      setCheckoutError("Your cart is empty.");
+      return;
+    }
+
+    setCheckoutLoading(true);
+    setCheckoutError("");
+    setPaymentNotice("");
+
+    const checkoutInput = {
+      customerName,
+      phone,
+      deliveryAddress,
+      customizationNotes,
+      items: cart.map((item) => ({
+        productId: Number(item.id),
+        quantity: item.quantity,
+      })),
+    };
+    const fingerprint = JSON.stringify(checkoutInput);
+    if (razorpayRequestRef.current?.fingerprint !== fingerprint) {
+      razorpayRequestRef.current = {
+        fingerprint,
+        key: crypto.randomUUID(),
+      };
+    }
+    const idempotencyKey = razorpayRequestRef.current.key;
+
+    try {
+      const scriptLoaded = await loadRazorpayCheckout();
+      if (!scriptLoaded || !window.Razorpay) {
+        throw new Error(
+          "Online payment could not be loaded. Please try WhatsApp ordering instead."
+        );
+      }
+
+      const createResponse = await fetch("/api/payments/create-order", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(checkoutInput),
+      });
+      const orderData = await createResponse.json();
+
+      if (
+        !createResponse.ok ||
+        !orderData.success ||
+        typeof orderData.keyId !== "string" ||
+        typeof orderData.orderId !== "string" ||
+        !Number.isSafeInteger(orderData.amount) ||
+        orderData.amount <= 0 ||
+        orderData.currency !== "INR"
+      ) {
+        throw new Error(
+          orderData.message || "Unable to prepare online payment."
+        );
+      }
+
+      let callbackReceived = false;
+      const checkout = new window.Razorpay({
+        key: orderData.keyId,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "Veloura Studio",
+        description: "Handmade order",
+        order_id: orderData.orderId,
+        prefill: {
+          name: customerName,
+          contact: phone,
+        },
+        theme: {
+          color: "#9b5b67",
+        },
+        handler: async (result) => {
+          callbackReceived = true;
+          setCheckoutLoading(true);
+          setPaymentNotice("");
+
+          try {
+            const verifyResponse = await fetch("/api/payments/verify", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(result),
+            });
+            const verifyData = await verifyResponse.json();
+
+            if (
+              verifyData.success &&
+              verifyData.paid === true &&
+              typeof verifyData.inventoryConflict === "boolean"
+            ) {
+              setOrderSuccessMethod("razorpay");
+              setOrderSuccess(
+                verifyData.inventoryConflict
+                  ? `Payment received for order ${orderData.orderId}. The studio is reviewing stock availability and will contact you about fulfilment.`
+                  : `Payment verified for order ${orderData.orderId}. Thank you for your purchase!`
+              );
+              clearCheckoutDetails();
+              return;
+            }
+
+            setPaymentNotice(
+              verifyData.pending
+                ? `Payment for order ${orderData.orderId} is still being confirmed. Please do not pay again yet.`
+                : `We could not confirm payment for order ${orderData.orderId}. Please contact the studio before trying again.`
+            );
+          } catch {
+            setPaymentNotice(
+              `We could not confirm payment status for order ${orderData.orderId}. Please do not pay again; contact the studio with this order number.`
+            );
+          } finally {
+            setCheckoutLoading(false);
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            if (!callbackReceived) {
+              setPaymentNotice(
+                `Checkout was closed. Payment for order ${orderData.orderId} is not confirmed. You can try again or choose WhatsApp ordering.`
+              );
+              setCheckoutLoading(false);
+            }
+          },
+        },
+      });
+
+      checkout.on("payment.failed", () => {
+        callbackReceived = true;
+        setCheckoutLoading(false);
+        setPaymentNotice(
+          `The payment for order ${orderData.orderId} was not completed. You can try again or choose WhatsApp ordering.`
+        );
+      });
+
+      checkout.open();
+    } catch (error) {
+      setCheckoutError(
+        error instanceof Error
+          ? error.message
+          : "Unable to start online payment. Please try again."
+      );
+      setCheckoutLoading(false);
+    }
+  }
+
 const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
   event.preventDefault();
   setCheckoutError("");
   setOrderSuccess("");
+  setOrderSuccessMethod(null);
+  setPaymentNotice("");
   setWhatsappOrderUrl("");
+
+  if (checkoutMethod === "razorpay") {
+    await handleRazorpayCheckout();
+    return;
+  }
 
   if (cart.length === 0) {
     setCheckoutError("Your cart is empty.");
@@ -170,11 +423,8 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
       `Order #${orderId} placed successfully! Total: ₹${orderTotal.toFixed(2)}`
     );
 
-    setCart([]);
-    setCustomerName("");
-    setPhone("");
-    setDeliveryAddress("");
-    setCustomizationNotes("");
+    setOrderSuccessMethod("whatsapp");
+    clearCheckoutDetails();
   } catch (error) {
     setCheckoutError(
       error instanceof Error
@@ -1037,27 +1287,36 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
             {orderSuccess ? (
               <div className="empty-cart">
                 <span aria-hidden="true">💗</span>
-                <h3>Thank you for your order!</h3>
+                <h3>
+                  {orderSuccessMethod === "razorpay"
+                    ? "Payment update"
+                    : "Thank you for your order!"}
+                </h3>
                 <p>{orderSuccess}</p>
-                <p>
-                  We have saved your order. You can now send the order details
-                  directly to us on WhatsApp.
-                </p>
 
-                {whatsappOrderUrl ? (
-                  <a
-                    className="checkout-button"
-                    href={whatsappOrderUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Send Order on WhatsApp ↗
-                  </a>
-                ) : (
-                  <p className="order-confirmation" role="alert">
-                    WhatsApp ordering is temporarily unavailable. Please contact
-                    us on Instagram instead.
-                  </p>
+                {orderSuccessMethod === "whatsapp" && (
+                  <>
+                    <p>
+                      We have saved your order. You can now send the order details
+                      directly to us on WhatsApp.
+                    </p>
+
+                    {whatsappOrderUrl ? (
+                      <a
+                        className="checkout-button"
+                        href={whatsappOrderUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Send Order on WhatsApp ↗
+                      </a>
+                    ) : (
+                      <p className="order-confirmation" role="alert">
+                        WhatsApp ordering is temporarily unavailable. Please contact
+                        us on Instagram instead.
+                      </p>
+                    )}
+                  </>
                 )}
 
                 <a
@@ -1075,6 +1334,7 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                   onClick={() => {
                     setCheckoutOpen(false);
                     setOrderSuccess("");
+                    setOrderSuccessMethod(null);
                   }}
                   style={{ marginTop: "12px" }}
                 >
@@ -1171,6 +1431,44 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                   </label>
                 </div>
 
+                <fieldset className="payment-method-options">
+                  <legend>Choose how you&apos;d like to order</legend>
+                  <label>
+                    <input
+                      type="radio"
+                      name="checkoutMethod"
+                      value="whatsapp"
+                      checked={checkoutMethod === "whatsapp"}
+                      onChange={() => setCheckoutMethod("whatsapp")}
+                      disabled={checkoutLoading}
+                    />
+                    <span>
+                      <strong>Order via WhatsApp</strong>
+                      <small>We&apos;ll confirm your order in a message.</small>
+                    </span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="checkoutMethod"
+                      value="razorpay"
+                      checked={checkoutMethod === "razorpay"}
+                      onChange={() => setCheckoutMethod("razorpay")}
+                      disabled={checkoutLoading}
+                    />
+                    <span>
+                      <strong>Pay Online with Razorpay</strong>
+                      <small>Secure checkout with supported payment methods.</small>
+                    </span>
+                  </label>
+                </fieldset>
+
+                {paymentNotice && (
+                  <p className="order-confirmation" role="status">
+                    {paymentNotice}
+                  </p>
+                )}
+
                 {checkoutError && (
                   <p className="order-confirmation" role="alert">
                     {checkoutError}
@@ -1183,11 +1481,19 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                   disabled={checkoutLoading || cart.length === 0}
                   style={{ marginTop: "20px" }}
                 >
-                  {checkoutLoading ? "Placing your order..." : `Place Order · ₹${total}`}
+                  {checkoutLoading
+                    ? checkoutMethod === "razorpay"
+                      ? "Preparing secure checkout..."
+                      : "Placing your order..."
+                    : checkoutMethod === "razorpay"
+                      ? `Pay Online · ₹${total}`
+                      : `Place WhatsApp Order · ₹${total}`}
                 </button>
 
                 <p className="checkout-small">
-                  Your order details will be saved to our order database. Payment and delivery arrangements will be confirmed separately.
+                  {checkoutMethod === "razorpay"
+                    ? "Your payment is confirmed only after our server verifies it with Razorpay."
+                    : "Your order details will be saved to our order database. Payment and delivery arrangements will be confirmed separately."}
                 </p>
               </form>
             )}
