@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Grid2X2,
+  Heart,
   House,
   LogIn,
   LogOut,
@@ -12,11 +13,13 @@ import {
   MessageCircle,
   Package,
   ShoppingBag,
+  Star,
   Store,
   UserPlus,
   UserRound,
   X,
 } from "lucide-react";
+import { useWishlist } from "@/lib/useWishlist";
 
 type Product = {
   id: number;
@@ -26,6 +29,9 @@ type Product = {
   image: string;
   category: string;
   stockQuantity: number;
+  lowStockThreshold: number;
+  averageRating: number;
+  reviewCount: number;
   emoji: string;
   color: string;
   tag: string;
@@ -149,7 +155,95 @@ const categories = [
     emoji: "💌",
     description: "Gifts from the heart",
   },
-];
+] as const;
+
+type CategoryName = (typeof categories)[number]["name"];
+type SelectedCategory = CategoryName | "All Products";
+
+function resolveProductCategory(
+  category: string | null,
+  name: string,
+  description: string,
+  image: string
+): CategoryName {
+  const productDetails = `${name} ${description} ${image}`.toLowerCase();
+  if (
+    productDetails.includes("frame") ||
+    productDetails.includes("forever love")
+  ) {
+    return "Birthday Gifts";
+  }
+  if (
+    productDetails.includes("lamp") ||
+    productDetails.includes("diya") ||
+    productDetails.includes("hanging")
+  ) {
+    return "Little Surprises";
+  }
+  if (productDetails.includes("birthday")) return "Birthday Gifts";
+  if (productDetails.includes("phone cover") || productDetails.includes("phone case")) {
+    return "Phone Covers";
+  }
+  if (productDetails.includes("keychain") || productDetails.includes("key chain")) {
+    return "Keychains";
+  }
+  if (productDetails.includes("bouquet")) return "Flower Bouquets";
+  if (
+    productDetails.includes("jewellery") ||
+    productDetails.includes("jewelry") ||
+    productDetails.includes("necklace") ||
+    productDetails.includes("bracelet") ||
+    productDetails.includes("earring")
+  ) {
+    return "Jewellery";
+  }
+  if (
+    productDetails.includes("scrunchie") ||
+    productDetails.includes("hair accessory") ||
+    productDetails.includes("hair clip") ||
+    productDetails.includes("hairband") ||
+    productDetails.includes("hair band") ||
+    productDetails.includes("bow")
+  ) {
+    return "Hair Accessories";
+  }
+
+  const normalizedCategory = category?.trim().toLowerCase() ?? "";
+  const categoryAliases: Record<string, CategoryName> = {
+    "flower bouquets": "Flower Bouquets",
+    bouquets: "Flower Bouquets",
+    flowers: "Handmade Flowers",
+    "handmade flowers": "Handmade Flowers",
+    keychain: "Keychains",
+    keychains: "Keychains",
+    "key chain": "Keychains",
+    "key chains": "Keychains",
+    jewellery: "Jewellery",
+    jewelry: "Jewellery",
+    "hair accessories": "Hair Accessories",
+    "hair accessory": "Hair Accessories",
+    accessories: "Hair Accessories",
+    "birthday gifts": "Birthday Gifts",
+    birthday: "Birthday Gifts",
+    "phone covers": "Phone Covers",
+    "phone cover": "Phone Covers",
+    "phone cases": "Phone Covers",
+    "phone case": "Phone Covers",
+    "little surprises": "Little Surprises",
+    gifts: "Little Surprises",
+    gift: "Little Surprises",
+    "home decor": "Little Surprises",
+  };
+  const categoryMatch = categoryAliases[normalizedCategory];
+  if (categoryMatch) return categoryMatch;
+
+  if (productDetails.includes("flower")) return "Handmade Flowers";
+  if (productDetails.includes("gift") || productDetails.includes("surprise")) {
+    return "Little Surprises";
+  }
+
+  return "Little Surprises";
+}
 
 const instagramUrl = "https://www.instagram.com/veloura.studio_26/";
 const instagramDmUrl = "https://ig.me/m/veloura.studio_26";
@@ -163,11 +257,20 @@ export default function ShopClient() {
   const [phone, setPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [customizationNotes, setCustomizationNotes] = useState("");
+  const [couponInput, setCouponInput] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState<{
+    code: string;
+    discountPaise: number;
+    subtotalPaise: number;
+  } | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState("");
   const [checkoutMethod, setCheckoutMethod] = useState<"whatsapp" | "razorpay">(
     "whatsapp"
   );
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState("");
+  const [stockMessage, setStockMessage] = useState("");
   const [orderSuccess, setOrderSuccess] = useState("");
   const [orderSuccessMethod, setOrderSuccessMethod] = useState<
     "whatsapp" | "razorpay" | null
@@ -184,7 +287,55 @@ export default function ShopClient() {
     setPhone("");
     setDeliveryAddress("");
     setCustomizationNotes("");
+    setCouponInput("");
+    setAppliedCoupon(null);
+    setCouponError("");
     razorpayRequestRef.current = null;
+  }
+
+  async function applyCoupon() {
+    if (!couponInput.trim()) {
+      setCouponError("Enter a coupon code to apply.");
+      return;
+    }
+    if (cart.length === 0) {
+      setCouponError("Add a product to your bag before applying a coupon.");
+      return;
+    }
+
+    setCouponLoading(true);
+    setCouponError("");
+    try {
+      const response = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: couponInput,
+          ...(/^[6-9]\d{9}$/.test(phone) ? { phone } : {}),
+          items: cart.map((item) => ({
+            productId: Number(item.id),
+            quantity: item.quantity,
+          })),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || "Unable to apply this coupon.");
+      }
+      setAppliedCoupon({
+        code: result.coupon.code,
+        discountPaise: Number(result.coupon.discountPaise),
+        subtotalPaise: Number(result.subtotalPaise),
+      });
+      setCouponInput(result.coupon.code);
+    } catch (error) {
+      setAppliedCoupon(null);
+      setCouponError(
+        error instanceof Error ? error.message : "Unable to apply this coupon."
+      );
+    } finally {
+      setCouponLoading(false);
+    }
   }
 
   async function handleRazorpayCheckout() {
@@ -202,6 +353,7 @@ export default function ShopClient() {
       phone,
       deliveryAddress,
       customizationNotes,
+      ...(appliedCoupon ? { couponCode: appliedCoupon.code } : {}),
       items: cart.map((item) => ({
         productId: Number(item.id),
         quantity: item.quantity,
@@ -368,6 +520,7 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
         phone,
         deliveryAddress,
         customizationNotes,
+        ...(appliedCoupon ? { couponCode: appliedCoupon.code } : {}),
         items: cart.map((item) => ({
           productId: Number(item.id),
           quantity: item.quantity,
@@ -378,7 +531,7 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
     const result = await response.json();
 
     if (!response.ok || !result.success) {
-      throw new Error(result.error || "Unable to place your order.");
+      throw new Error(result.error || result.message || "Unable to place your order.");
     }
 
     const orderId = result.order.id;
@@ -395,6 +548,12 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
       "",
       "Order details:",
       ...orderItems,
+      ...(result.order.couponCode
+        ? [
+            `Subtotal: ₹${Number(result.order.subtotalBeforeDiscount).toFixed(2)}`,
+            `Coupon (${result.order.couponCode}): -₹${Number(result.order.discount).toFixed(2)}`,
+          ]
+        : []),
       "",
       `Total: ₹${orderTotal.toFixed(2)}`,
       "",
@@ -436,6 +595,8 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
   }
 };
   const [products, setProducts] = useState<Product[]>([]);
+  const [selectedCategory, setSelectedCategory] =
+    useState<SelectedCategory>("All Products");
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
@@ -446,8 +607,10 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
   const [authStatus, setAuthStatus] = useState<
     "loading" | "logged-in" | "logged-out" | "error"
   >("loading");
+  const wishlist = useWishlist(authStatus);
   const [authError, setAuthError] = useState("");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [wishlistCartError, setWishlistCartError] = useState("");
 
   const itemCount = cart.reduce(
     (sum, item) => sum + item.quantity,
@@ -458,6 +621,16 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
     (sum, item) => sum + item.price * item.quantity,
     0
   );
+  const appliedDiscount =
+    appliedCoupon && appliedCoupon.subtotalPaise === Math.round(total * 100)
+      ? appliedCoupon.discountPaise / 100
+      : 0;
+  const payableTotal = Math.max(total - appliedDiscount, 0);
+
+  const visibleProducts =
+    selectedCategory === "All Products"
+      ? products
+      : products.filter((product) => product.category === selectedCategory);
 
   useEffect(() => {
     let cancelled = false;
@@ -478,6 +651,9 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
             image: string | null;
             category: string | null;
             stockQuantity: number;
+            lowStockThreshold: number;
+            averageRating: number;
+            reviewCount: number;
           }>;
           message?: string;
         } = await response.json();
@@ -510,8 +686,16 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
             description: product.description ?? "Carefully handmade, especially for you.",
             price: Number(product.price),
             image: product.image ?? "",
-            category: product.category ?? "Handmade",
+            category: resolveProductCategory(
+              product.category,
+              product.name,
+              product.description ?? "",
+              product.image ?? ""
+            ),
             stockQuantity: Number(product.stockQuantity ?? 0),
+            lowStockThreshold: Number(product.lowStockThreshold ?? 5),
+            averageRating: Number(product.averageRating ?? 0),
+            reviewCount: Number(product.reviewCount ?? 0),
             emoji,
             color,
             tag,
@@ -636,13 +820,30 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
     setMenuOpen(false);
   }
 
-  function addToCart(product: Product) {
+  function selectCategory(category: SelectedCategory, scrollToProducts = false) {
+    setSelectedCategory(category);
+    if (scrollToProducts) {
+      document.getElementById("shop")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }
+
+  const addToCart = useCallback((product: Product) => {
+    const existingItem = cart.find((item) => item.id === product.id);
+    if (product.stockQuantity <= 0) {
+      setStockMessage(`${product.name} is currently out of stock.`);
+      return;
+    }
+    if (existingItem && existingItem.quantity >= product.stockQuantity) {
+      setStockMessage(`Only ${product.stockQuantity} ${product.name} available.`);
+      return;
+    }
+
     setCart((currentCart) => {
-      const existingItem = currentCart.find(
+      const currentItem = currentCart.find(
         (item) => item.id === product.id
       );
 
-      if (existingItem) {
+      if (currentItem) {
         return currentCart.map((item) =>
           item.id === product.id
             ? { ...item, quantity: item.quantity + 1 }
@@ -653,11 +854,58 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
       return [...currentCart, { ...product, quantity: 1 }];
     });
 
+    setAppliedCoupon(null);
+    setCouponError("");
     setCartOpen(true);
     setOrderCopied(false);
-  }
+    setStockMessage("");
+  }, [cart]);
+
+  useEffect(() => {
+    if (products.length === 0) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const pendingProductId = window.sessionStorage.getItem(
+          "veloura_wishlist_cart_product"
+        );
+        if (!pendingProductId) return;
+
+        window.sessionStorage.removeItem("veloura_wishlist_cart_product");
+        const product = products.find(
+          (candidate) => candidate.id === Number(pendingProductId)
+        );
+
+        if (!product) {
+          setWishlistCartError(
+            "That saved product is no longer available to add to your bag."
+          );
+          return;
+        }
+
+        addToCart(product);
+      } catch (error) {
+        console.error("Wishlist cart handoff could not be completed:", error);
+        setWishlistCartError("Unable to add this favourite to your bag.");
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [addToCart, products]);
 
   function changeQuantity(productId: number, change: number) {
+    const item = cart.find((cartItem) => cartItem.id === productId);
+    if (
+      change > 0 &&
+      item &&
+      item.quantity + change > item.stockQuantity
+    ) {
+      setStockMessage(
+        `Only ${item.stockQuantity} ${item.name} available right now.`
+      );
+      return;
+    }
+
     setCart((currentCart) =>
       currentCart
         .map((item) =>
@@ -668,6 +916,9 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
         .filter((item) => item.quantity > 0)
     );
 
+    setAppliedCoupon(null);
+    setCouponError("");
+    setStockMessage("");
     setOrderCopied(false);
   }
 
@@ -676,6 +927,8 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
       currentCart.filter((item) => item.id !== productId)
     );
 
+    setAppliedCoupon(null);
+    setCouponError("");
     setOrderCopied(false);
   }
 
@@ -775,6 +1028,10 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
             <UserRound size={16} aria-hidden="true" />
             <span>My Account</span>
           </Link>
+          <Link href="/wishlist" onClick={() => closeNavigation()}>
+            <Heart size={16} aria-hidden="true" />
+            <span>Wishlist ({wishlist.productIds.length})</span>
+          </Link>
           <a
             href={instagramDmUrl}
             target="_blank"
@@ -853,6 +1110,18 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
               {authError}
             </span>
           )}
+          <Link
+            className="wishlist-button"
+            href="/wishlist"
+            aria-label={`Wishlist, ${wishlist.productIds.length} items`}
+          >
+            <Heart
+              size={19}
+              fill={wishlist.productIds.length > 0 ? "currentColor" : "none"}
+              aria-hidden="true"
+            />
+            <span className="wishlist-count">{wishlist.productIds.length}</span>
+          </Link>
           <button
             className="cart-button"
             type="button"
@@ -932,11 +1201,23 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
         </div>
 
         <div className="category-grid">
+          <button
+            className={`category-card category-all${selectedCategory === "All Products" ? " is-selected" : ""}`}
+            type="button"
+            aria-pressed={selectedCategory === "All Products"}
+            onClick={() => selectCategory("All Products", true)}
+          >
+            <span className="category-emoji" aria-hidden="true">🛍️</span>
+            <h3>All Products</h3>
+            <p>Browse the whole collection</p>
+          </button>
           {categories.map((category) => (
-            <a
-              className="category-card"
-              href="#shop"
+            <button
+              className={`category-card${selectedCategory === category.name ? " is-selected" : ""}`}
+              type="button"
               key={category.name}
+              aria-pressed={selectedCategory === category.name}
+              onClick={() => selectCategory(category.name, true)}
             >
               <span className="category-emoji" aria-hidden="true">
                 {category.emoji}
@@ -944,7 +1225,7 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
 
               <h3>{category.name}</h3>
               <p>{category.description}</p>
-            </a>
+            </button>
           ))}
         </div>
       </section>
@@ -955,6 +1236,50 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
           <h2>Little things you&apos;ll love ♡</h2>
           <p>Each piece is made with care and a whole lot of love.</p>
         </div>
+
+        <nav className="shop-category-filters" aria-label="Filter products by category">
+          <ul className="shop-category-list">
+            <li>
+              <button
+                className={`shop-category-filter${selectedCategory === "All Products" ? " is-selected" : ""}`}
+                type="button"
+                aria-pressed={selectedCategory === "All Products"}
+                onClick={() => selectCategory("All Products")}
+              >
+                All Products
+              </button>
+            </li>
+            {categories.map((category) => (
+              <li key={category.name}>
+                <button
+                  className={`shop-category-filter${selectedCategory === category.name ? " is-selected" : ""}`}
+                  type="button"
+                  aria-pressed={selectedCategory === category.name}
+                  onClick={() => selectCategory(category.name)}
+                >
+                  {category.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        {!productsLoading && !productsError && products.length > 0 && (
+          <div className="shop-results" role="status" aria-live="polite">
+            <p className="shop-selected-category">
+              Showing <strong>{selectedCategory}</strong>
+            </p>
+            {(visibleProducts.length > 0 || selectedCategory === "All Products") && (
+              <p className="shop-product-count">
+                {visibleProducts.length}{" "}
+                {visibleProducts.length === 1 ? "product" : "products"}
+                {selectedCategory === "All Products"
+                  ? " in the collection"
+                  : ` in ${selectedCategory}`}
+              </p>
+            )}
+          </div>
+        )}
 
         {productsLoading && (
           <p className="shop-note" role="status">Loading our handmade collection… ♡</p>
@@ -974,15 +1299,53 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
         )}
 
         {!productsLoading && !productsError && products.length === 0 && (
-          <p className="shop-note">No products are available right now. Please check back soon ♡</p>
+          <div className="shop-empty-state" role="status">
+            <h3>No products found</h3>
+            <p>There are currently no products in this category.</p>
+          </div>
         )}
 
-        {!productsLoading && !productsError && products.length > 0 && (
+        {!productsLoading &&
+          !productsError &&
+          products.length > 0 &&
+          visibleProducts.length === 0 && (
+            <div className="shop-empty-state" role="status">
+              <h3>No products found</h3>
+              <p>There are currently no products in this category.</p>
+            </div>
+          )}
+
+        {!productsLoading && !productsError && visibleProducts.length > 0 && (
           <div className="product-grid">
-            {products.map((product) => (
+            {visibleProducts.map((product) => (
             <article className="product-card" key={product.id}>
               <div className={`product-art ${product.color}`}>
                 <span className="product-tag">{product.tag}</span>
+                <button
+                  className={`wishlist-heart${wishlist.productIds.includes(product.id) ? " is-favourite" : ""}`}
+                  type="button"
+                  aria-label={
+                    wishlist.productIds.includes(product.id)
+                      ? `Remove ${product.name} from wishlist`
+                      : `Add ${product.name} to wishlist`
+                  }
+                  aria-pressed={wishlist.productIds.includes(product.id)}
+                  disabled={
+                    wishlist.isSyncing ||
+                    wishlist.pendingProductIds.includes(product.id)
+                  }
+                  onClick={() =>
+                    void (wishlist.productIds.includes(product.id)
+                      ? wishlist.removeFromWishlist(product.id)
+                      : wishlist.addToWishlist(product.id))
+                  }
+                >
+                  <Heart
+                    size={19}
+                    fill={wishlist.productIds.includes(product.id) ? "currentColor" : "none"}
+                    aria-hidden="true"
+                  />
+                </button>
 
                 {!imageErrors.includes(product.id) ? (
                   <img
@@ -1005,8 +1368,17 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
               </div>
 
               <div className="product-info">
+                <p className={`product-stock-status ${product.stockQuantity <= 0 ? "out" : product.stockQuantity <= product.lowStockThreshold ? "low" : "in"}`}>
+                  {product.stockQuantity <= 0
+                    ? "Out of Stock"
+                    : product.stockQuantity <= product.lowStockThreshold
+                      ? `Only ${product.stockQuantity} left`
+                      : "In Stock"}
+                </p>
                 <div className="product-title-row">
-                  <h3>{product.name}</h3>
+                  <h3>
+                    <Link href={`/product/${product.id}`}>{product.name}</Link>
+                  </h3>
                   <span className="product-price">
                     ₹{product.price}
                   </span>
@@ -1015,6 +1387,31 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                 <p className="product-description">
                   {product.description || "Carefully handmade, especially for you."}
                 </p>
+
+                <Link
+                  className="product-rating"
+                  href={`/product/${product.id}#reviews`}
+                  aria-label={
+                    product.reviewCount > 0
+                      ? `${product.averageRating.toFixed(1)} out of 5 stars, ${product.reviewCount} reviews`
+                      : "Be the first to review this product"
+                  }
+                >
+                  <span className="product-rating-stars" aria-hidden="true">
+                    {Array.from({ length: 5 }, (_, index) => (
+                      <Star
+                        key={index}
+                        size={14}
+                        fill={index < Math.round(product.averageRating) ? "currentColor" : "none"}
+                      />
+                    ))}
+                  </span>
+                  <span>
+                    {product.reviewCount > 0
+                      ? `${product.averageRating.toFixed(1)} · ${product.reviewCount} ${product.reviewCount === 1 ? "review" : "reviews"}`
+                      : "Be the first to review"}
+                  </span>
+                </Link>
 
                 <button
                   className="add-button"
@@ -1030,9 +1427,19 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
           </div>
         )}
 
-        <p className="shop-note">
-          More handmade surprises coming soon ♡
-        </p>
+        {wishlist.error && (
+          <p className="wishlist-message" role="alert">{wishlist.error}</p>
+        )}
+        {wishlistCartError && (
+          <p className="wishlist-message" role="alert">{wishlistCartError}</p>
+        )}
+        {stockMessage && (
+          <p className="product-stock-message" role="status">{stockMessage}</p>
+        )}
+
+        {visibleProducts.length > 0 && (
+          <p className="shop-note">More handmade surprises coming soon ♡</p>
+        )}
       </section>
 
       <section className="section about-section" id="about">
@@ -1135,6 +1542,9 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
             ) : (
               <>
                 <div className="cart-items">
+                  {stockMessage && (
+                    <p className="product-stock-message" role="status">{stockMessage}</p>
+                  )}
                   {cart.map((item) => (
                     <div className="cart-item" key={item.id}>
                       <div className={`cart-item-art ${item.color}`}>
@@ -1179,6 +1589,7 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                             onClick={() =>
                               changeQuantity(item.id, 1)
                             }
+                            disabled={item.quantity >= item.stockQuantity}
                             aria-label={`Increase ${item.name} quantity`}
                           >
                             +
@@ -1359,9 +1770,71 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                     </div>
                   ))}
 
+                  <div className="checkout-coupon">
+                    <label htmlFor="checkout-coupon-code">Have a coupon?</label>
+                    <div className="checkout-coupon-entry">
+                      <input
+                        id="checkout-coupon-code"
+                        type="text"
+                        value={couponInput}
+                        onChange={(event) => {
+                          setCouponInput(event.target.value.toUpperCase());
+                          setAppliedCoupon(null);
+                          setCouponError("");
+                        }}
+                        maxLength={40}
+                        autoComplete="off"
+                        placeholder="Enter code"
+                        disabled={couponLoading || checkoutLoading}
+                      />
+                      {appliedCoupon ? (
+                        <button
+                          type="button"
+                          className="checkout-coupon-remove"
+                          onClick={() => {
+                            setAppliedCoupon(null);
+                            setCouponError("");
+                          }}
+                          disabled={checkoutLoading}
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="checkout-coupon-apply"
+                          onClick={() => void applyCoupon()}
+                          disabled={couponLoading || checkoutLoading}
+                        >
+                          {couponLoading ? "Checking…" : "Apply"}
+                        </button>
+                      )}
+                    </div>
+                    {couponError && (
+                      <p className="checkout-coupon-error" role="alert">{couponError}</p>
+                    )}
+                    {appliedCoupon && appliedDiscount > 0 && (
+                      <p className="checkout-coupon-success" role="status">
+                        {appliedCoupon.code} applied — you save ₹{appliedDiscount.toFixed(2)}.
+                      </p>
+                    )}
+                  </div>
+
+                  {appliedDiscount > 0 && (
+                    <>
+                      <div className="cart-total checkout-subtotal">
+                        <span>Subtotal</span>
+                        <strong>₹{total.toFixed(2)}</strong>
+                      </div>
+                      <div className="cart-total checkout-discount">
+                        <span>Coupon · {appliedCoupon?.code}</span>
+                        <strong>−₹{appliedDiscount.toFixed(2)}</strong>
+                      </div>
+                    </>
+                  )}
                   <div className="cart-total">
                     <span>Total</span>
-                    <strong>₹{total}</strong>
+                    <strong>₹{payableTotal.toFixed(2)}</strong>
                   </div>
                 </div>
 
@@ -1486,8 +1959,8 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                       ? "Preparing secure checkout..."
                       : "Placing your order..."
                     : checkoutMethod === "razorpay"
-                      ? `Pay Online · ₹${total}`
-                      : `Place WhatsApp Order · ₹${total}`}
+                      ? `Pay Online · ₹${payableTotal.toFixed(2)}`
+                      : `Place WhatsApp Order · ₹${payableTotal.toFixed(2)}`}
                 </button>
 
                 <p className="checkout-small">

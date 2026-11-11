@@ -3,6 +3,13 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer";
 import { getRazorpay } from "@/lib/payments/razorpay";
+import {
+  CouponValidationError,
+  getCouponCustomerKey,
+  hasCouponSchema,
+  normalizeCouponCode,
+  validateCoupon,
+} from "@/lib/coupons";
 import type { Orders } from "razorpay/dist/types/orders";
 
 const RESERVATION_MINUTES = 15;
@@ -17,6 +24,7 @@ type CreateOrderInput = {
   phone: string;
   deliveryAddress: string;
   customizationNotes?: string;
+  couponCode?: string;
   items: CartItemInput[];
 };
 
@@ -25,7 +33,8 @@ type OrderCreationErrorCode =
   | "UNAVAILABLE_PRODUCT"
   | "INSUFFICIENT_STOCK"
   | "INVALID_PRODUCT_PRICE"
-  | "ORDER_TOTAL_TOO_LARGE";
+  | "ORDER_TOTAL_TOO_LARGE"
+  | "INVALID_COUPON";
 
 class OrderCreationError extends Error {
   constructor(public readonly code: OrderCreationErrorCode) {
@@ -56,6 +65,8 @@ function parseOrderInput(value: unknown): {
     typeof value.customizationNotes === "string"
       ? value.customizationNotes.trim()
       : "";
+  const couponCode =
+    value.couponCode === undefined ? "" : normalizeCouponCode(value.couponCode);
 
   if (
     !customerName ||
@@ -64,6 +75,9 @@ function parseOrderInput(value: unknown): {
     !deliveryAddress ||
     deliveryAddress.length > 2000 ||
     customizationNotes.length > 2000 ||
+    (value.couponCode !== undefined &&
+      (typeof value.couponCode !== "string" ||
+        !/^[A-Z0-9][A-Z0-9_-]{2,39}$/.test(couponCode))) ||
     !Array.isArray(value.items) ||
     value.items.length === 0 ||
     value.items.length > 100
@@ -99,6 +113,7 @@ function parseOrderInput(value: unknown): {
       phone,
       deliveryAddress,
       customizationNotes,
+      ...(couponCode ? { couponCode } : {}),
       items: [...quantities].map(([productId, quantity]) => ({
         productId,
         quantity,
@@ -122,6 +137,7 @@ function getRequestFingerprint(
     phone: input.phone,
     deliveryAddress: input.deliveryAddress,
     customizationNotes: input.customizationNotes ?? "",
+    couponCode: input.couponCode ?? "",
     items: [...input.items].sort((a, b) => a.productId - b.productId),
   };
 
@@ -175,6 +191,7 @@ export async function POST(request: Request) {
   let orderId: string | null = null;
   let attemptId: string | null = null;
   let amountPaise = 0;
+  let couponSchemaReady = false;
   let existingAttempt:
     | {
         id: string;
@@ -190,6 +207,7 @@ export async function POST(request: Request) {
 
   try {
     await client.query("BEGIN");
+    couponSchemaReady = await hasCouponSchema(client);
     await client.query(
       "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
       [idempotencyKey]
@@ -215,6 +233,24 @@ export async function POST(request: Request) {
        WHERE status = 'reserved'
          AND expires_at <= NOW()`
     );
+    if (couponSchemaReady) {
+      await client.query(
+        `UPDATE coupon_redemptions cr
+         SET status = 'expired', updated_at = NOW()
+         FROM orders o
+         JOIN payment_attempts pa ON pa.order_id = o.id
+         WHERE cr.order_id = o.id
+           AND pa.status = 'expired'
+           AND cr.status = 'reserved'
+           AND cr.expires_at <= NOW()`
+      );
+      await client.query(
+        `UPDATE coupon_redemptions
+         SET status = 'expired', updated_at = NOW()
+         WHERE status = 'reserved'
+           AND expires_at <= NOW()`
+      );
+    }
 
     const existingResult = await client.query<NonNullable<typeof existingAttempt>>(
       `SELECT id, order_id, request_fingerprint, razorpay_order_id, amount_paise, currency, status, expires_at
@@ -338,41 +374,82 @@ export async function POST(request: Request) {
       throw new OrderCreationError("INVALID_PRODUCT_PRICE");
     }
 
-    const orderResult = await client.query<{ id: string }>(
-      `INSERT INTO orders (
-         customer_id,
-         customer_name,
-         phone,
-         delivery_address,
-         customization_notes,
-         subtotal_paise,
-         status,
-         payment_method,
-         payment_status
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'razorpay', 'pending')
-       RETURNING id`,
-      [
-        customerSession?.customerId ?? null,
-        parsed.input.customerName,
-        parsed.input.phone,
-        parsed.input.deliveryAddress,
-        parsed.input.customizationNotes || null,
-        subtotalPaise,
-      ]
-    );
+    if (parsed.input.couponCode && !couponSchemaReady) {
+      throw new CouponValidationError(
+        "SCHEMA_UNAVAILABLE",
+        "Coupons are temporarily unavailable. Please place your order without a coupon."
+      );
+    }
+    const coupon = parsed.input.couponCode
+      ? await validateCoupon(client, {
+          code: parsed.input.couponCode,
+          subtotalPaise,
+          customerKey: getCouponCustomerKey(
+            customerSession?.customerId ?? null,
+            parsed.input.phone
+          ),
+          lock: true,
+        })
+      : null;
+    const payablePaise = subtotalPaise - (coupon?.discountPaise ?? 0);
+
+    const orderResult = coupon
+      ? await client.query<{ id: string }>(
+          `INSERT INTO orders (
+             customer_id, customer_name, phone, delivery_address,
+             customization_notes, subtotal_paise, coupon_id, coupon_code,
+             coupon_discount_paise, status, payment_method, payment_status
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 'razorpay', 'pending')
+           RETURNING id`,
+          [
+            customerSession?.customerId ?? null,
+            parsed.input.customerName,
+            parsed.input.phone,
+            parsed.input.deliveryAddress,
+            parsed.input.customizationNotes || null,
+            payablePaise,
+            coupon.id,
+            coupon.code,
+            coupon.discountPaise,
+          ]
+        )
+      : await client.query<{ id: string }>(
+          `INSERT INTO orders (
+             customer_id, customer_name, phone, delivery_address,
+             customization_notes, subtotal_paise, status, payment_method,
+             payment_status
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, 'pending', 'razorpay', 'pending')
+           RETURNING id`,
+          [
+            customerSession?.customerId ?? null,
+            parsed.input.customerName,
+            parsed.input.phone,
+            parsed.input.deliveryAddress,
+            parsed.input.customizationNotes || null,
+            subtotalPaise,
+          ]
+        );
     orderId = orderResult.rows[0].id;
 
     for (const item of orderItems) {
       await client.query(
         `INSERT INTO order_items (
            order_id,
+           product_id,
            product_name,
            quantity,
            unit_price_paise
          )
-         VALUES ($1, $2, $3, $4)`,
-        [orderId, item.productName, item.quantity, item.unitPricePaise]
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          orderId,
+          item.productId,
+          item.productName,
+          item.quantity,
+          item.unitPricePaise,
+        ]
       );
     }
 
@@ -400,7 +477,27 @@ export async function POST(request: Request) {
       ]
     );
     attemptId = attemptResult.rows[0].id;
-    amountPaise = subtotalPaise;
+    amountPaise = payablePaise;
+
+    if (coupon) {
+      await client.query(
+        `INSERT INTO coupon_redemptions (
+           coupon_id, order_id, customer_id, customer_key, code_snapshot,
+           subtotal_paise, discount_paise, status, expires_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'reserved', $8)`,
+        [
+          coupon.id,
+          orderId,
+          customerSession?.customerId ?? null,
+          getCouponCustomerKey(customerSession?.customerId ?? null, parsed.input.phone),
+          coupon.code,
+          subtotalPaise,
+          coupon.discountPaise,
+          attemptResult.rows[0].expires_at,
+        ]
+      );
+    }
 
     for (const item of orderItems) {
       await client.query(
@@ -465,6 +562,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if (error instanceof CouponValidationError) {
+      return NextResponse.json(
+        { success: false, code: error.code, message: error.message },
+        { status: error.code === "SCHEMA_UNAVAILABLE" ? 503 : 400 }
+      );
+    }
+
     if (error instanceof OrderCreationError) {
       const responses: Record<OrderCreationErrorCode, readonly [number, string]> = {
         INVALID_INPUT: [400, "Please check your checkout details."],
@@ -472,11 +576,19 @@ export async function POST(request: Request) {
         INSUFFICIENT_STOCK: [409, "There is not enough available stock."],
         INVALID_PRODUCT_PRICE: [500, "A product has an invalid online price."],
         ORDER_TOTAL_TOO_LARGE: [400, "The order total is too large."],
+        INVALID_COUPON: [400, "The coupon code is invalid."],
       };
       const response = responses[error.code];
       return NextResponse.json(
         { success: false, message: response[1] },
         { status: response[0] }
+      );
+    }
+
+    if (error instanceof CouponValidationError) {
+      return NextResponse.json(
+        { success: false, code: error.code, message: error.message },
+        { status: 400 }
       );
     }
 
@@ -535,6 +647,15 @@ export async function POST(request: Request) {
            AND status = 'reserved'`,
         [attemptId]
       );
+      if (couponSchemaReady) {
+        await failureClient.query(
+          `UPDATE coupon_redemptions
+           SET status = 'released', updated_at = NOW()
+           WHERE order_id = $1
+             AND status = 'reserved'`,
+          [orderId]
+        );
+      }
       await failureClient.query(
         `UPDATE orders
          SET payment_status = 'failed'

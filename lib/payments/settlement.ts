@@ -2,6 +2,8 @@ import "server-only";
 
 import type { PoolClient } from "pg";
 import { getCaptureReplayDisposition } from "@/lib/payments/webhook-state";
+import { recordInventoryMovement } from "@/lib/inventory";
+import { hasCouponSchema } from "@/lib/coupons";
 
 type PaymentEvent = {
   paymentId: string;
@@ -189,12 +191,28 @@ export async function markPaymentCaptured(
 
     if (!inventoryConflict) {
       for (const reservation of reservations) {
-        await client.query(
+        const stockUpdate = await client.query<{ stock_quantity: number }>(
           `UPDATE products
            SET stock_quantity = stock_quantity - $2
-           WHERE id = $1`,
+           WHERE id = $1
+           RETURNING stock_quantity`,
           [reservation.product_id, reservation.quantity]
         );
+        const stockAfter = Number(stockUpdate.rows[0]?.stock_quantity);
+        if (!Number.isSafeInteger(stockAfter) || stockAfter < 0) {
+          throw new Error("Inventory deduction did not return a valid stock balance.");
+        }
+        await recordInventoryMovement(client, {
+          productId: reservation.product_id!,
+          orderId: attempt.order_id,
+          movementType: "sale",
+          quantityChange: -reservation.quantity,
+          stockBefore: stockAfter + reservation.quantity,
+          stockAfter,
+          reason: `Razorpay payment captured for order #${attempt.order_id}`,
+          idempotencyKey: `payment:${attemptId}:sale:${reservation.product_id}`,
+          actor: "payment",
+        });
       }
     }
   }
@@ -224,6 +242,18 @@ export async function markPaymentCaptured(
      WHERE id = $1`,
     [attempt.order_id]
   );
+  if (await hasCouponSchema(client)) {
+    await client.query(
+      `UPDATE coupon_redemptions
+       SET status = 'redeemed',
+           redeemed_at = NOW(),
+           expires_at = NULL,
+           updated_at = NOW()
+       WHERE order_id = $1
+         AND status = 'reserved'`,
+      [attempt.order_id]
+    );
+  }
 
   return { alreadyProcessed: false, inventoryConflict };
 }
@@ -266,6 +296,15 @@ export async function markPaymentFailed(
        AND status = 'reserved'`,
     [attemptId]
   );
+  if (await hasCouponSchema(client)) {
+    await client.query(
+      `UPDATE coupon_redemptions
+       SET status = 'released', updated_at = NOW()
+       WHERE order_id = $1
+         AND status = 'reserved'`,
+      [attempt.order_id]
+    );
+  }
   await client.query(
     `UPDATE orders
      SET payment_status = 'failed'

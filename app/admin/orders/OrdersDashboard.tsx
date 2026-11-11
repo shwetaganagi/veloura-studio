@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type OrderItem = {
   productName: string;
@@ -128,6 +129,20 @@ export default function AdminOrdersPage() {
   }
 
   async function updateOrderStatus(orderId: number, status: string) {
+    const order = orders.find((candidate) => candidate.id === orderId);
+    let restockConfirmed = false;
+    if (status === "cancelled" && order && order.status !== "pending") {
+      restockConfirmed = window.confirm(
+        "Confirm restock only if the cancelled order's items have physically returned and are available to sell."
+      );
+      if (
+        !restockConfirmed &&
+        !window.confirm("Cancel the order without adding its items back to stock?")
+      ) {
+        return;
+      }
+    }
+
     setUpdatingOrderId(orderId);
     setError("");
 
@@ -137,7 +152,7 @@ export default function AdminOrdersPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ orderId, status }),
+        body: JSON.stringify({ orderId, status, restockConfirmed }),
       });
 
       if (response.status === 401) {
@@ -293,13 +308,39 @@ const filteredOrders = orders.filter((order) => {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-xl border border-[#e5d2c7] bg-white px-5 py-3 text-sm font-medium text-[#80604f] shadow-sm transition hover:border-[#c9a697] hover:bg-[#fffaf7] focus:outline-none focus:ring-4 focus:ring-[#80604f]/10"
-          >
-            Log out <span className="ml-2">↗</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/admin/customers"
+              className="rounded-xl border border-[#e5d2c7] bg-white px-5 py-3 text-sm font-medium text-[#80604f] shadow-sm transition hover:border-[#c9a697] hover:bg-[#fffaf7] focus:outline-none focus:ring-4 focus:ring-[#80604f]/10"
+            >
+              Customers
+            </Link>
+            <Link
+              href="/admin/inventory"
+              className="rounded-xl border border-[#e5d2c7] bg-white px-5 py-3 text-sm font-medium text-[#80604f] shadow-sm transition hover:border-[#c9a697] hover:bg-[#fffaf7] focus:outline-none focus:ring-4 focus:ring-[#80604f]/10"
+            >
+              Inventory
+            </Link>
+            <Link
+              href="/admin/reviews"
+              className="rounded-xl border border-[#e5d2c7] bg-white px-5 py-3 text-sm font-medium text-[#80604f] shadow-sm transition hover:border-[#c9a697] hover:bg-[#fffaf7] focus:outline-none focus:ring-4 focus:ring-[#80604f]/10"
+            >
+              Reviews
+            </Link>
+            <Link
+              href="/admin/coupons"
+              className="rounded-xl border border-[#e5d2c7] bg-white px-5 py-3 text-sm font-medium text-[#80604f] shadow-sm transition hover:border-[#c9a697] hover:bg-[#fffaf7] focus:outline-none focus:ring-4 focus:ring-[#80604f]/10"
+            >
+              Coupons
+            </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-xl border border-[#e5d2c7] bg-white px-5 py-3 text-sm font-medium text-[#80604f] shadow-sm transition hover:border-[#c9a697] hover:bg-[#fffaf7] focus:outline-none focus:ring-4 focus:ring-[#80604f]/10"
+            >
+              Log out <span className="ml-2">↗</span>
+            </button>
+          </div>
         </header>
 
         {/* Error message */}
