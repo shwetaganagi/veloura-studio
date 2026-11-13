@@ -1,99 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { pool } from "@/lib/db";
-import {
-  createCustomerSession,
-  CUSTOMER_SESSION_COOKIE,
-  CUSTOMER_SESSION_COOKIE_OPTIONS,
-} from "@/lib/auth/customer";
-
+import { authEmailHtml, enforceAuthRateLimit, getAppBaseUrl, issueAuthToken, sendAuthEmail, welcomeEmailHtml } from "@/lib/auth/flows";
+import { CUSTOMER_PASSWORD_ERROR, isValidCustomerPassword } from "@/lib/auth/password-policy";
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-
-    const fullName =
-      typeof body.fullName === "string" ? body.fullName.trim() : "";
-    const email =
-      typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
-    const password =
-      typeof body.password === "string" ? body.password : "";
-
-    if (fullName.length < 2 || fullName.length > 150) {
-      return NextResponse.json(
-        { success: false, message: "Enter a name between 2 and 150 characters." },
-        { status: 400 }
-      );
-    }
-
-    if (
-      email.length > 255 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    ) {
-      return NextResponse.json(
-        { success: false, message: "Enter a valid email address." },
-        { status: 400 }
-      );
-    }
-
-    if (password.length < 8 || password.length > 72) {
-      return NextResponse.json(
-        { success: false, message: "Password must be between 8 and 72 characters." },
-        { status: 400 }
-      );
-    }
-
-    const existingCustomer = await pool.query(
-      "SELECT id FROM customers WHERE LOWER(email) = LOWER($1) LIMIT 1",
-      [email]
-    );
-
-    if (existingCustomer.rowCount && existingCustomer.rowCount > 0) {
-      return NextResponse.json(
-        { success: false, message: "This email is already registered. Please log in." },
-        { status: 409 }
-      );
-    }
-
+    if (!(await enforceAuthRateLimit(request, "register"))) return NextResponse.json({ success: false, message: "Too many requests. Please try again later." }, { status: 429 });
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object" || Array.isArray(body)) return NextResponse.json({ success: false, message: "Enter valid registration details." }, { status: 400 });
+    const fullName = typeof body.fullName === "string" ? body.fullName.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    if (fullName.length < 2 || fullName.length > 150) return NextResponse.json({ success: false, message: "Enter a name between 2 and 150 characters." }, { status: 400 });
+    if (email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ success: false, message: "Enter a valid email address." }, { status: 400 });
+    if (!isValidCustomerPassword(password)) return NextResponse.json({ success: false, message: CUSTOMER_PASSWORD_ERROR }, { status: 400 });
     const passwordHash = await bcrypt.hash(password, 12);
-
-    const result = await pool.query(
-      `INSERT INTO customers (full_name, email, password_hash)
-       VALUES ($1, $2, $3)
-       RETURNING id, full_name, email, email_verified`,
+    const inserted = await pool.query<{ id: string; email: string; email_verified: boolean }>(
+      `INSERT INTO customers (full_name, email, password_hash, email_verified)
+       VALUES ($1, $2, $3, FALSE) ON CONFLICT DO NOTHING RETURNING id, email, email_verified`,
       [fullName, email, passwordHash]
     );
-
-    const customer = result.rows[0];
-    const token = await createCustomerSession(String(customer.id));
-
-    const response = NextResponse.json(
-      {
-        success: true,
-        message: "Your account has been created successfully.",
-        customer: {
-          id: String(customer.id),
-          fullName: customer.full_name,
-          email: customer.email,
-          emailVerified: customer.email_verified,
-        },
-      },
-      { status: 201 }
-    );
-
-    response.cookies.set(
-      CUSTOMER_SESSION_COOKIE,
-      token,
-      CUSTOMER_SESSION_COOKIE_OPTIONS
-    );
-
-    return response;
+    let customerId = inserted.rows[0]?.id;
+    if (!customerId) {
+      const existing = await pool.query<{ id: string; email_verified: boolean }>("SELECT id, email_verified FROM customers WHERE LOWER(email) = $1 LIMIT 1", [email]);
+      if (!existing.rows[0] || existing.rows[0].email_verified) return NextResponse.json({ success: true, message: "If this email can be registered, a verification link will be sent shortly." });
+      customerId = existing.rows[0].id;
+    }
+    try {
+      const token = await issueAuthToken(String(customerId), "verify_email");
+      const url = `${getAppBaseUrl(request)}/verify-email?token=${encodeURIComponent(token)}`;
+      const customer = inserted.rows[0] ?? (await pool.query<{ email: string }>("SELECT email FROM customers WHERE id = $1", [customerId])).rows[0];
+      if (inserted.rows[0]) {
+        await sendAuthEmail(customer.email, "Welcome to Veloura Studio — verify your email", welcomeEmailHtml(fullName, url));
+      } else {
+        await sendAuthEmail(customer.email, "Verify your Veloura Studio account", authEmailHtml("Verify your email", "Verify email address", url, "24 hours"));
+      }
+    } catch (error) {
+      console.error("Verification email could not be sent:", error instanceof Error ? error.message : "unknown error");
+      return NextResponse.json({ success: true, message: "If this email can be registered, a verification link will be sent. If it doesn’t arrive, please try again later." });
+    }
+    return NextResponse.json({ success: true, message: "If this email can be registered, a verification link will be sent shortly." });
   } catch (error) {
-    console.error("Customer registration error:", error);
-
-    return NextResponse.json(
-      { success: false, message: "Unable to create your account right now." },
-      { status: 500 }
-    );
+    console.error("Customer registration error:", error instanceof Error ? error.message : "unknown error");
+    return NextResponse.json({ success: false, message: "Unable to create your account right now." }, { status: 500 });
   }
 }

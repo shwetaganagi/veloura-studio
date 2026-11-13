@@ -2,6 +2,7 @@ import "server-only";
 
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { pool } from "@/lib/db";
 
 export const CUSTOMER_SESSION_COOKIE = "veloura_customer_session";
 
@@ -19,8 +20,8 @@ function getCustomerSessionSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
-export async function createCustomerSession(customerId: string) {
-  return new SignJWT({ role: "customer" })
+export async function createCustomerSession(customerId: string, sessionVersion = 0) {
+  return new SignJWT({ role: "customer", sv: sessionVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(customerId)
     .setIssuer("veloura-studio")
@@ -50,9 +51,18 @@ export async function verifyCustomerSession(token: string) {
       return null;
     }
 
-    return {
+    const session = {
       customerId: payload.sub,
+      sessionVersion: typeof payload.sv === "number" && Number.isInteger(payload.sv) ? payload.sv : 0,
     };
+    const result = await pool.query<{ email_verified: boolean; auth_session_version: number }>(
+      "SELECT email_verified, auth_session_version FROM customers WHERE id = $1 LIMIT 1",
+      [session.customerId]
+    );
+    const customer = result.rows[0];
+    return customer?.email_verified && Number(customer.auth_session_version) === session.sessionVersion
+      ? session
+      : null;
   } catch {
     return null;
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer";
+import { isValidEmailAddress, sendOrderEmails } from "@/lib/auth/flows";
 import { hasPaymentInventoryReservations } from "@/lib/inventory";
 import {
   CouponValidationError,
@@ -17,6 +18,7 @@ type OrderItemInput = {
 
 type CreateOrderInput = {
   customerName: string;
+  email: string;
   phone: string;
   deliveryAddress: string;
   customizationNotes?: string;
@@ -38,6 +40,7 @@ export async function POST(request: Request) {
 
   const customerName =
     typeof body.customerName === "string" ? body.customerName.trim() : "";
+  const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
 
   const phone = typeof body.phone === "string" ? body.phone.trim() : "";
   const isValidPhone = /^[6-9]\d{9}$/.test(phone);
@@ -64,11 +67,11 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!customerName || !phone || !deliveryAddress) {
+  if (!customerName || !isValidEmailAddress(email) || !phone || !deliveryAddress) {
     return NextResponse.json(
       {
         success: false,
-        message: "Customer name, phone number, and delivery address are required.",
+        message: "Enter your name, a valid email address, phone number, and delivery address.",
       },
       { status: 400 }
     );
@@ -327,6 +330,17 @@ export async function POST(request: Request) {
     }
 
     await client.query("COMMIT");
+
+    try {
+      await sendOrderEmails({
+        id: String(order.id), customerName, phone, email, address: deliveryAddress,
+        totalPaise: payablePaise,
+        items: orderItems.map((item) => ({ name: item.productName, quantity: item.quantity, unitPricePaise: item.unitPricePaise })),
+        ...(customizationNotes ? { notes: customizationNotes } : {}),
+      });
+    } catch {
+      console.error(`Order email delivery failed for order #${String(order.id)}.`);
+    }
 
     return NextResponse.json(
       {

@@ -2558,6 +2558,50 @@ main {
   line-height: 1.6;
 }
 
+.auth-success {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border: 1px solid #d6e8d7;
+  background: #f0f8ef;
+  color: #287a45;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.auth-result {
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: white;
+  text-align: center;
+}
+
+.auth-result strong {
+  font-family: "Playfair Display", serif;
+  font-size: 21px;
+  font-weight: 500;
+}
+
+.auth-result p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.auth-result a,
+.auth-action-link {
+  color: var(--pink-dark);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.auth-action-link {
+  display: grid;
+  place-items: center;
+  margin-top: 24px;
+  color: white;
+}
+
 .auth-switch {
   margin: 25px 0 20px;
   color: var(--muted);

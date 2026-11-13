@@ -166,6 +166,14 @@ function resolveProductCategory(
   description: string,
   image: string
 ): CategoryName {
+  const normalizedCategory = category?.trim().toLowerCase() ?? "";
+  if (normalizedCategory === "jewellery" || normalizedCategory === "jewelry") {
+    return "Jewellery";
+  }
+  if (normalizedCategory === "little surprises") {
+    return "Little Surprises";
+  }
+
   const productDetails = `${name} ${description} ${image}`.toLowerCase();
   if (
     productDetails.includes("frame") ||
@@ -208,7 +216,6 @@ function resolveProductCategory(
     return "Hair Accessories";
   }
 
-  const normalizedCategory = category?.trim().toLowerCase() ?? "";
   const categoryAliases: Record<string, CategoryName> = {
     "flower bouquets": "Flower Bouquets",
     bouquets: "Flower Bouquets",
@@ -254,6 +261,7 @@ export default function ShopClient() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
+  const [customerEmail, setCustomerEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [deliveryAddress, setDeliveryAddress] = useState("");
   const [customizationNotes, setCustomizationNotes] = useState("");
@@ -284,6 +292,7 @@ export default function ShopClient() {
   function clearCheckoutDetails() {
     setCart([]);
     setCustomerName("");
+    setCustomerEmail("");
     setPhone("");
     setDeliveryAddress("");
     setCustomizationNotes("");
@@ -350,6 +359,7 @@ export default function ShopClient() {
 
     const checkoutInput = {
       customerName,
+      email: customerEmail.trim(),
       phone,
       deliveryAddress,
       customizationNotes,
@@ -517,6 +527,7 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
       },
       body: JSON.stringify({
         customerName,
+        email: customerEmail.trim(),
         phone,
         deliveryAddress,
         customizationNotes,
@@ -1855,6 +1866,20 @@ const handleCheckout = async (event: React.FormEvent<HTMLFormElement>) => {
                       maxLength={120}
                       autoComplete="name"
                       placeholder="Enter your full name"
+                      style={{ width: "100%", padding: "12px", marginTop: "6px" }}
+                    />
+                  </label>
+
+                  <label>
+                    Email address *
+                    <input
+                      type="email"
+                      value={customerEmail}
+                      onChange={(event) => setCustomerEmail(event.target.value)}
+                      required
+                      maxLength={255}
+                      autoComplete="email"
+                      placeholder="Where should we send your order updates?"
                       style={{ width: "100%", padding: "12px", marginTop: "6px" }}
                     />
                   </label>

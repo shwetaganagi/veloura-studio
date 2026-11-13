@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { getCustomerSession } from "@/lib/auth/customer";
 import { getRazorpay } from "@/lib/payments/razorpay";
+import { getOrderEmailDetails, isValidEmailAddress, sendOrderEmails } from "@/lib/auth/flows";
 import {
   CouponValidationError,
   getCouponCustomerKey,
@@ -21,6 +22,7 @@ type CartItemInput = {
 
 type CreateOrderInput = {
   customerName: string;
+  email: string;
   phone: string;
   deliveryAddress: string;
   customizationNotes?: string;
@@ -56,6 +58,7 @@ function parseOrderInput(value: unknown): {
 
   const customerName =
     typeof value.customerName === "string" ? value.customerName.trim() : "";
+  const email = typeof value.email === "string" ? value.email.trim().toLowerCase() : "";
   const phone = typeof value.phone === "string" ? value.phone.trim() : "";
   const deliveryAddress =
     typeof value.deliveryAddress === "string"
@@ -71,6 +74,7 @@ function parseOrderInput(value: unknown): {
   if (
     !customerName ||
     customerName.length > 150 ||
+    !isValidEmailAddress(email) ||
     !/^[6-9]\d{9}$/.test(phone) ||
     !deliveryAddress ||
     deliveryAddress.length > 2000 ||
@@ -110,6 +114,7 @@ function parseOrderInput(value: unknown): {
   return {
     input: {
       customerName,
+      email,
       phone,
       deliveryAddress,
       customizationNotes,
@@ -134,6 +139,7 @@ function getRequestFingerprint(
   const canonicalInput = {
     customerId,
     customerName: input.customerName,
+    email: input.email,
     phone: input.phone,
     deliveryAddress: input.deliveryAddress,
     customizationNotes: input.customizationNotes ?? "",
@@ -705,6 +711,13 @@ export async function POST(request: Request) {
     );
   } finally {
     finalizeClient.release();
+  }
+
+  try {
+    const emailOrder = await getOrderEmailDetails(orderId, parsed.input.email);
+    if (emailOrder) await sendOrderEmails({ ...emailOrder, paymentPending: true });
+  } catch {
+    console.error(`Order email delivery failed for order #${orderId}.`);
   }
 
   return NextResponse.json(

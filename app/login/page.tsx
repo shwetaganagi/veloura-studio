@@ -1,22 +1,12 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
-
-  const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-
-    if (params.get("registered") === "1") {
-      setNotice("Account created successfully! Please sign in.");
-    }
-  }, []);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -63,21 +53,6 @@ export default function LoginPage() {
         <p className="auth-description">
           Sign in to explore your orders and continue shopping.
         </p>
-
-        {notice && (
-          <p
-            style={{
-              color: "#287a45",
-              background: "#edf8ef",
-              padding: "12px",
-              fontSize: "12px",
-              textAlign: "center",
-            }}
-            role="status"
-          >
-            {notice}
-          </p>
-        )}
 
         <form onSubmit={handleLogin} className="auth-form">
           <label htmlFor="email">Email address</label>
